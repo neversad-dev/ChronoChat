@@ -1,0 +1,17 @@
+# Environment files containing secrets
+.env
+
+# Telethon session files
+*.session
+*.session-journal
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Nix build inputs & artifacts
+.direnv/
+result
+result-*
