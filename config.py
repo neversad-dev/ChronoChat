@@ -43,6 +43,22 @@ def save_credentials(api_id: int, api_hash: str):
     os.environ["TG_API_ID"] = str(api_id)
     os.environ["TG_API_HASH"] = api_hash
 
+def get_download_dir():
+    env_path = get_env_path()
+    from dotenv import dotenv_values
+    env_dict = dotenv_values(env_path)
+    
+    download_dir = env_dict.get("DOWNLOAD_DIR") or os.getenv("DOWNLOAD_DIR")
+    if download_dir:
+        return download_dir
+    return os.path.expanduser("~/Downloads/chronochat")
+
+def set_download_dir(path: str):
+    env_path = get_env_path()
+    env_path.touch(exist_ok=True)
+    set_key(str(env_path), "DOWNLOAD_DIR", path)
+    os.environ["DOWNLOAD_DIR"] = path
+
 def clear_credentials():
     env_path = get_env_path()
     if env_path.exists():

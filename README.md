@@ -12,7 +12,12 @@
 - [Roadmap](#roadmap)
 - [License](#license)
 
-A Python application for interacting with the Telegram API using Telethon, managed via a multiplatform Nix dev shell. ChronoChat downloads media from your chats and attaches proper timestamps.
+A Python application for interacting with the Telegram API using Telethon, managed via a multiplatform Nix dev shell. ChronoChat downloads media from your chats and automatically corrects timestamps so they appear correctly in Google Photos.
+
+## Features
+- Default download location `~/Downloads/chronochat` (configurable via Settings).
+- Interactive terminal menu with Settings (change download directory, clear credentials, log out).
+- Metadata correction for images **and videos** using bundled `exiftool` (earliest date from message, filename, or existing metadata).
 
 ## Prerequisites
 
