@@ -57,16 +57,17 @@ Or run it directly from your host shell:
 nix develop --command python3 main.py
 ```
 
-### 3. Interactive Configuration (First Run Only)
+### 3. Interactive Terminal Menu
 
-On your first run, the script will guide you through setting up your configuration:
-1. **API Credentials**: It will prompt you for the `api_id` and `api_hash` you generated earlier. These are securely saved in your local configuration directory (e.g., `~/.config/chronochat/config.env`).
-2. **Log In to Telegram**: Telethon will then prompt you to log in:
-   - **Phone number**: Enter your full phone number including the country code (e.g. `+12345678900`).
-   - **Code**: Enter the login code Telegram sends to your other active sessions (or SMS).
-   - **Password**: If you have Two-Factor Authentication (2FA) enabled, enter your password.
+ChronoChat now features a rich, interactive terminal menu that automatically adapts to your current session state:
 
-This authenticates your device and creates a local `chronochat.session` file in your config directory. Future runs will load this configuration automatically without any prompts.
+- **No Credentials**: Prompts for your `api_id` and `api_hash`, which are actively validated and securely saved in your local configuration directory (e.g., `~/.config/chronochat/config.env`).
+- **Not Logged In**: Prompts you to log in. Enter your phone number, the login code sent to your Telegram, and your Two-Step Verification password if enabled.
+- **Logged In**: 
+  - **Show Chat List**: Fetch and browse all your chats dynamically. Chats are paginated (10 per page) for easy viewing. You can use the **Search** feature to quickly filter chats by their name.
+  - **Log Out**: Securely disconnect and destroy your local session.
+
+This interactive menu uses `questionary` for smooth arrow-key navigation and intuitive prompts. Future runs will load your authenticated configuration automatically without any login prompts.
 
 ## Roadmap
 

@@ -27,6 +27,7 @@
               (pkgs.python312.withPackages (ps: with ps; [
                 (telethon.overridePythonAttrs (old: { doCheck = false; }))
                 python-dotenv
+                questionary
               ]))
             ];
 
