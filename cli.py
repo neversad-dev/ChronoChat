@@ -76,12 +76,20 @@ async def download_chat_media(client, dialog):
             if message.file and message.file.mime_type:
                 mime = message.file.mime_type.lower()
                 if mime.startswith('image/') or mime.startswith('video/'):
-                    path = await client.download_media(message, file=save_dir)
-                    if path:
+                    expected_name = getattr(message.file, "name", None)
+                    target_path = os.path.join(save_dir, expected_name) if expected_name else None
+                    if target_path and os.path.exists(target_path):
                         count += 1
-                        print(f"[+] Downloaded file {os.path.basename(path)}")
+                        print(f"[=] Skipping already existing {expected_name}")
                         if message.date:
-                            metadata.adjust_media_metadata(path, message.date)
+                            metadata.adjust_media_metadata(target_path, message.date)
+                    else:
+                        path = await client.download_media(message, file=save_dir)
+                        if path:
+                            count += 1
+                            print(f"[+] Downloaded file {os.path.basename(path)}")
+                            if message.date:
+                                metadata.adjust_media_metadata(path, message.date)
                         
         print(f"\n[+] Finished downloading {count} media files to '{save_dir}'.\n")
     except Exception as e:
@@ -143,6 +151,7 @@ async def show_chat_list(client):
                 choices.append(questionary.Choice("Clear Search", "clear_search"))
                 
             choices.append(questionary.Choice("Download Media from Chat", "download_media"))
+            choices.append(questionary.Choice("Download All Media", "download_all"))
             choices.append(questionary.Choice("Quit List", "quit"))
             
             action = await questionary.select(
@@ -173,6 +182,11 @@ async def show_chat_list(client):
                         print("[-] Invalid chat number. Please enter a number visible on the current page.")
                 else:
                     print("[-] Invalid input.")
+            elif action == "download_all":
+                print("[*] Downloading media from all chats...")
+                for dlg in all_dialogs:
+                    await download_chat_media(client, dlg)
+                print("[+] Finished downloading all chats.")
             else:
                 print()
                 break
@@ -289,7 +303,7 @@ async def main_loop():
                     action = await questionary.select(
                         f"ChronoChat - Logged In ({me.first_name})",
                         choices=[
-                            questionary.Choice("Show Chat List", "show_chats"),
+                            questionary.Choice("Download Media", "show_chats"),
                             questionary.Choice("Settings", "settings"),
                             questionary.Choice("Exit", "exit")
                         ]
