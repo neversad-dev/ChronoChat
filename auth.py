@@ -25,11 +25,24 @@ async def validate_credentials(api_id, api_hash):
         await client.disconnect()
 
 async def get_client(api_id, api_hash):
+    import sqlite3
     session_path = config.get_session_path()
     client = TelegramClient(str(session_path), api_id, api_hash)
     try:
         await client.connect()
         return client
+    except sqlite3.OperationalError as e:
+        if 'database is locked' in str(e).lower():
+            # Remove the corrupted or locked session file and retry once
+            session_file = session_path.with_suffix('.session')
+            if session_file.exists():
+                session_file.unlink()
+            # Recreate client after deleting session
+            client = TelegramClient(str(session_path), api_id, api_hash)
+            await client.connect()
+            return client
+        else:
+            raise
     except Exception:
         await client.disconnect()
         raise

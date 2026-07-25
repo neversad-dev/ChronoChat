@@ -254,11 +254,14 @@ async def main_loop():
             if action == "set_creds":
                 await prompt_credentials()
             elif action == "settings":
-                await handle_settings(None, is_auth=False, has_creds=False)
+                res = await handle_settings(None, is_auth=False, has_creds=False)
+                if res == "break":
+                    continue
             else:
                 break
         else:
             print("[*] Connecting to Telegram...")
+            client = None
             try:
                 client = await auth.get_client(api_id, api_hash)
             except Exception as e:
