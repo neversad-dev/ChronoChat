@@ -5,6 +5,7 @@ import auth
 import metadata
 from telethon import errors
 from telethon.tl.types import InputMessagesFilterPhotoVideo, InputMessagesFilterDocument
+import shutil
 
 async def prompt_credentials():
     print("\n[!] Please enter your Telegram API credentials.")
@@ -106,13 +107,19 @@ async def show_chat_list(client):
 
         search_query = ""
         current_page = 0
-        PAGE_SIZE = 10
-        
+        # Determine page size based on terminal height, reserving lines for UI elements
+        try:
+            term_rows = shutil.get_terminal_size().lines
+        except Exception:
+            term_rows = 24
+        PAGE_SIZE = max(10, term_rows - 14)
+
         while True:
             if search_query:
                 dialogs = [d for d in all_dialogs if search_query.lower() in (d.title or "Unknown").lower()]
             else:
                 dialogs = all_dialogs
+
 
             total_pages = max(1, (len(dialogs) + PAGE_SIZE - 1) // PAGE_SIZE)
             
