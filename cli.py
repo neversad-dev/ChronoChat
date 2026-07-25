@@ -1,4 +1,5 @@
 import os
+import sys
 import questionary
 import config
 import auth
@@ -96,16 +97,21 @@ async def download_chat_media(client, dialog):
     except Exception as e:
         print(f"[-] Error downloading media: {e}\n")
 
-async def show_chat_list(client):
+async def show_chat_list_paginated(client, initial_search=""):
+    """Display a paginated list of chats with minimal actions.
+    Allows navigating pages, downloading media from a selected chat,
+    and returning to the previous menu. Supports an optional initial
+    search query.
+    """
     try:
         print("\n[+] Fetching dialogs...")
         all_dialogs = await client.get_dialogs()
-        
+
         if not all_dialogs:
             print("[-] No chats found.\n")
             return
 
-        search_query = ""
+        search_query = initial_search
         current_page = 0
         # Determine page size based on terminal height, reserving lines for UI elements
         try:
@@ -115,30 +121,28 @@ async def show_chat_list(client):
         PAGE_SIZE = max(10, term_rows - 14)
 
         while True:
-            if search_query:
-                dialogs = [d for d in all_dialogs if search_query.lower() in (d.title or "Unknown").lower()]
-            else:
-                dialogs = all_dialogs
-
+            dialogs = (
+                [d for d in all_dialogs if search_query.lower() in (d.title or "Unknown").lower()]
+                if search_query else all_dialogs
+            )
 
             total_pages = max(1, (len(dialogs) + PAGE_SIZE - 1) // PAGE_SIZE)
-            
-            # Ensure current_page is valid
+
             if current_page >= total_pages:
                 current_page = total_pages - 1
             if current_page < 0:
                 current_page = 0
-                
+
             start_idx = current_page * PAGE_SIZE
             end_idx = start_idx + PAGE_SIZE
             page_dialogs = dialogs[start_idx:end_idx]
-            
+
             header = f"\n--- Chats (Page {current_page + 1}/{total_pages})"
             if search_query:
                 header += f" [Search: '{search_query}']"
             header += " ---"
             print(header)
-            
+
             if not page_dialogs:
                 print("[-] No chats match your search.")
             else:
@@ -146,38 +150,25 @@ async def show_chat_list(client):
                     title = dialog.title or "Unknown"
                     print(f"{start_idx + i + 1}. {title}")
             print("-------------------------")
-                
-            choices = []
+
+            inner_choices = []
             if current_page < total_pages - 1:
-                choices.append(questionary.Choice("Next Page", "next"))
+                inner_choices.append(questionary.Choice("Next Page", "next"))
             if current_page > 0:
-                choices.append(questionary.Choice("Previous Page", "prev"))
-                
-            choices.append(questionary.Choice("Search", "search"))
-            if search_query:
-                choices.append(questionary.Choice("Clear Search", "clear_search"))
-                
-            choices.append(questionary.Choice("Download Media from Chat", "download_media"))
-            choices.append(questionary.Choice("Download All Media", "download_all"))
-            choices.append(questionary.Choice("Quit List", "quit"))
-            
+                inner_choices.append(questionary.Choice("Previous Page", "prev"))
+            inner_choices.append(questionary.Choice("Download Media from Chat", "download_media"))
+            inner_choices.append(questionary.Choice("Back", "back"))
+            inner_choices.append(questionary.Choice("Exit", "exit"))
+
             action = await questionary.select(
                 "Select action:",
-                choices=choices
+                choices=inner_choices
             ).ask_async()
-            
-            if action == "prev":
-                current_page -= 1
-            elif action == "next":
+
+            if action == "next":
                 current_page += 1
-            elif action == "search":
-                query = await questionary.text("Enter search query:").ask_async()
-                if query:
-                    search_query = query
-                    current_page = 0
-            elif action == "clear_search":
-                search_query = ""
-                current_page = 0
+            elif action == "prev":
+                current_page -= 1
             elif action == "download_media":
                 chat_num = await questionary.text("Enter chat number from the list above:").ask_async()
                 if chat_num and chat_num.isdigit():
@@ -189,17 +180,46 @@ async def show_chat_list(client):
                         print("[-] Invalid chat number. Please enter a number visible on the current page.")
                 else:
                     print("[-] Invalid input.")
-            elif action == "download_all":
-                print("[*] Downloading media from all chats...")
-                for dlg in all_dialogs:
-                    await download_chat_media(client, dlg)
-                print("[+] Finished downloading all chats.")
-            else:
-                print()
+            elif action == "back":
                 break
-                
+            elif action == "exit":
+                sys.exit(0)
     except Exception as e:
         print(f"[-] Failed to fetch dialogs: {e}\n")
+
+async def download_media_menu(client):
+    """Top‑level menu for downloading media.
+    Provides options to view all chats, search, download all media,
+    go back to the previous menu, or exit the application.
+    """
+    while True:
+        action = await questionary.select(
+            "Download Media Menu:",
+            choices=[
+                questionary.Choice("Show all chats", "show_chats"),
+                questionary.Choice("Search", "search"),
+                questionary.Choice("Download all media", "download_all"),
+                questionary.Choice("Back", "back"),
+                questionary.Choice("Exit", "exit"),
+            ],
+        ).ask_async()
+
+        if action == "show_chats":
+            await show_chat_list_paginated(client)
+        elif action == "search":
+            query = await questionary.text("Enter search query:").ask_async()
+            if query:
+                await show_chat_list_paginated(client, initial_search=query)
+        elif action == "download_all":
+            print("[*] Downloading media from all chats...")
+            dialogs = await client.get_dialogs()
+            for dlg in dialogs:
+                await download_chat_media(client, dlg)
+            print("[+] Finished downloading all chats.")
+        elif action == "back":
+            break
+        elif action == "exit":
+            sys.exit(0)
 
 async def handle_logout(client):
     confirm = await questionary.confirm("Are you sure you want to log out?").ask_async()
@@ -313,14 +333,14 @@ async def main_loop():
                     action = await questionary.select(
                         f"ChronoChat - Logged In ({me.first_name})",
                         choices=[
-                            questionary.Choice("Download Media", "show_chats"),
+                            questionary.Choice("Download Media", "download_media"),
                             questionary.Choice("Settings", "settings"),
                             questionary.Choice("Exit", "exit")
                         ]
                     ).ask_async()
                     
-                    if action == "show_chats":
-                        await show_chat_list(client)
+                    if action == "download_media":
+                        await download_media_menu(client)
                     elif action == "settings":
                         res = await handle_settings(client, is_auth=True, has_creds=True)
                         if res == "break":
