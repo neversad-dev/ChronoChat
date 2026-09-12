@@ -17,6 +17,39 @@
       nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
     in
     {
+      packages = forAllSystems (system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        {
+          default = pkgs.python312Packages.buildPythonApplication {
+            pname = "chronochat";
+            version = "0.1.0";
+            pyproject = true;
+
+            src = ./.;
+
+            build-system = [
+              pkgs.python312Packages.setuptools
+            ];
+
+            dependencies = [
+              (pkgs.python312Packages.telethon.overridePythonAttrs (old: { doCheck = false; }))
+              pkgs.python312Packages.python-dotenv
+              pkgs.python312Packages.questionary
+            ];
+
+            propagatedBuildInputs = [ pkgs.exiftool ];
+          };
+        });
+
+      apps = forAllSystems (system: {
+        default = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/chronochat";
+        };
+      });
+
       devShells = forAllSystems (system:
         let
           pkgs = nixpkgsFor.${system};
