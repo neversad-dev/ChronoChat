@@ -38,28 +38,32 @@ To use the Telegram API, you must register your application to obtain an `api_id
 
 ## Usage
 
-### 1. Enter the Nix Development Environment
+### 1. Run the Application Directly
 
-Start a shell containing Python and the required libraries (`telethon`, `python-dotenv`) by running:
+Because this project is packaged as a Nix Flake, you don't even need to clone the repository to run it. If you have Nix installed, you can launch ChronoChat directly from GitHub:
+
+```bash
+nix run github:neversad-dev/ChronoChat
+```
+
+**Local Development Run:**
+If you have cloned the repository locally, you can run the application directly from the project directory:
+```bash
+nix run .#
+```
+
+### 2. Local Development Environment
+
+If you are developing or modifying the codebase, you can drop into a shell containing Python and the required libraries by running:
 
 ```bash
 nix develop
 ```
 
-Upon entering, you will see a welcome message showing the active Python environment.
-
-### 2. Run the Application
-
-Once inside the development environment, execute the main script:
+Upon entering, you will see a welcome message. You can then execute the main script normally:
 
 ```bash
 python3 main.py
-```
-
-Or run it directly from your host shell:
-
-```bash
-nix develop --command python3 main.py
 ```
 
 ### 3. Interactive Terminal Menu
@@ -76,9 +80,11 @@ This interactive menu uses `questionary` for smooth arrow-key navigation and int
 
 ## Roadmap
 
-- ✅ Proof of concept using Telethon (in progress, cannot create Telegram app yet)
-- 📥 Download media from chats (add date/chat filter controls)
-- 🛠️ Add EXIF tool to modify media metadata
+- ✅ Proof of concept using Telethon
+- ✅ Package as a Nix flake app for global installation
+- ✅ Securely manage user credentials (XDG config)
+- ✅ Download media from chats (with date/chat filter controls)
+- ✅ Add EXIF tool to modify media metadata
 - 🌐 Support other messengers
 
 ## License
