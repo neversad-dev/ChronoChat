@@ -1,8 +1,10 @@
 import asyncio
 import sys
 from cli import main_loop
+import db
 
 def main():
+    db.init_db()
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:

@@ -52,6 +52,33 @@ async def handle_login(client):
     except Exception as e:
         print(f"[-] Login failed: {e}\n")
 
+import db
+import asyncio
+
+async def _process_message(client, message, chat_id, save_dir, sem):
+    status = db.get_status(chat_id, message.id)
+    if status == 'success':
+        return 'skipped'
+
+    async with sem:
+        try:
+            # Small delay to respect Telegram's rate limits when downloading in parallel
+            await asyncio.sleep(0.3)
+            path = await client.download_media(message, file=save_dir)
+            if path:
+                if message.date:
+                    metadata.adjust_media_metadata(path, message.date)
+                db.update_status(chat_id, message.id, 'success')
+                print(f"[+] Downloaded {os.path.basename(path)}")
+                return 'success'
+            else:
+                db.update_status(chat_id, message.id, 'failure', 'Empty path returned')
+                return 'failure'
+        except Exception as e:
+            db.update_status(chat_id, message.id, 'failure', str(e))
+            print(f"[-] Failed message {message.id}: {e}")
+            return 'failure'
+
 async def download_chat_media(client, dialog):
     print(f"\n[*] Downloading media from '{dialog.title or 'Unknown'}'...")
     safe_title = "".join([c for c in (dialog.title or "Unknown") if c.isalpha() or c.isdigit() or c in (' ', '-', '_')]).rstrip()
@@ -61,41 +88,42 @@ async def download_chat_media(client, dialog):
     save_dir = os.path.join(base_dir, safe_title)
     os.makedirs(save_dir, exist_ok=True)
 
-    count = 0
+    sem = asyncio.Semaphore(5)
+    tasks = set()
+    MAX_TASKS = 100
+
+    async def _wait_tasks(min_len=0):
+        while len(tasks) > min_len:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            tasks.difference_update(done)
+
     try:
-        print("[*] Fetching photos and videos (media)...")
+        print("[*] Processing photos and videos...")
         async for message in client.iter_messages(dialog.id, filter=InputMessagesFilterPhotoVideo):
             if message.media:
-                path = await client.download_media(message, file=save_dir)
-                if path:
-                    count += 1
-                    print(f"[+] Downloaded {os.path.basename(path)}")
-                    if message.date:
-                        metadata.adjust_media_metadata(path, message.date)
+                task = asyncio.create_task(_process_message(client, message, dialog.id, save_dir, sem))
+                tasks.add(task)
+                await _wait_tasks(MAX_TASKS)
 
-        print("[*] Fetching documents (files)...")
+        print("[*] Processing documents (images/videos)...")
         async for message in client.iter_messages(dialog.id, filter=InputMessagesFilterDocument):
             if message.file and message.file.mime_type:
                 mime = message.file.mime_type.lower()
                 if mime.startswith('image/') or mime.startswith('video/'):
-                    expected_name = getattr(message.file, "name", None)
-                    target_path = os.path.join(save_dir, expected_name) if expected_name else None
-                    if target_path and os.path.exists(target_path):
-                        count += 1
-                        print(f"[=] Skipping already existing {expected_name}")
-                        if message.date:
-                            metadata.adjust_media_metadata(target_path, message.date)
-                    else:
-                        path = await client.download_media(message, file=save_dir)
-                        if path:
-                            count += 1
-                            print(f"[+] Downloaded file {os.path.basename(path)}")
-                            if message.date:
-                                metadata.adjust_media_metadata(path, message.date)
-                        
-        print(f"\n[+] Finished downloading {count} media files to '{save_dir}'.\n")
+                    task = asyncio.create_task(_process_message(client, message, dialog.id, save_dir, sem))
+                    tasks.add(task)
+                    await _wait_tasks(MAX_TASKS)
+
+        # Wait for all remaining tasks to complete
+        await _wait_tasks(0)
+
+        # Print summary from database
+        summary = db.get_chat_summary(dialog.id)
+        success_count = summary.get('success', 0)
+        failure_count = summary.get('failure', 0)
+        print(f"\n[+] Finished '{dialog.title}'. Total Success: {success_count}, Failures: {failure_count}\n")
     except Exception as e:
-        print(f"[-] Error downloading media: {e}\n")
+        print(f"[-] Fatal error during chat download: {e}\n")
 
 async def show_chat_list_paginated(client, initial_search=""):
     """Display a paginated list of chats with minimal actions.

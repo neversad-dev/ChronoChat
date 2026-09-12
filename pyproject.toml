@@ -18,4 +18,4 @@ dependencies = [
 chronochat = "main:main"
 
 [tool.setuptools]
-py-modules = ["auth", "config", "metadata", "cli", "main"]
+py-modules = ["auth", "config", "metadata", "cli", "main", "db"]

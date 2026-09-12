@@ -18,6 +18,8 @@ A Python application for interacting with the Telegram API using Telethon, manag
 - Default download location `~/Downloads/chronochat` (configurable via Settings).
 - Interactive terminal menu with Settings (change download directory, clear credentials, log out).
 - Metadata correction for images **and videos** using bundled `exiftool` (earliest date from message, filename, or existing metadata).
+- **Concurrent Media Downloading**: Uses asynchronous semaphores to download multiple files simultaneously while avoiding Telegram's rate limits.
+- **Resilient State Tracking**: Maintains a built-in SQLite database (`~/.config/chronochat/downloads.db`) to track successful downloads. You can safely interrupt a large download with `Ctrl+C` and instantly resume later without re-downloading a single file.
 
 ## Prerequisites
 
