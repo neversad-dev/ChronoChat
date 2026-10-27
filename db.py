@@ -1,9 +1,12 @@
 import sqlite3
 import os
+import asyncio
 import config
+
 
 def get_db_path():
     return config.get_config_dir() / "downloads.db"
+
 
 def init_db():
     db_path = get_db_path()
@@ -22,19 +25,25 @@ def init_db():
     conn.commit()
     conn.close()
 
-def get_status(chat_id: int, message_id: int):
+
+def _get_status(chat_id: int, message_id: int):
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT status FROM media_downloads 
+        SELECT status FROM media_downloads
         WHERE chat_id = ? AND message_id = ?
     ''', (chat_id, message_id))
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
 
-def update_status(chat_id: int, message_id: int, status: str, error_message: str = None):
+
+async def get_status(chat_id: int, message_id: int):
+    return await asyncio.to_thread(_get_status, chat_id, message_id)
+
+
+def _update_status(chat_id: int, message_id: int, status: str, error_message: str = None):
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -49,15 +58,24 @@ def update_status(chat_id: int, message_id: int, status: str, error_message: str
     conn.commit()
     conn.close()
 
-def get_chat_summary(chat_id: int):
+
+async def update_status(chat_id: int, message_id: int, status: str, error_message: str = None):
+    return await asyncio.to_thread(_update_status, chat_id, message_id, status, error_message)
+
+
+def _get_chat_summary(chat_id: int):
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT status, COUNT(*) FROM media_downloads 
+        SELECT status, COUNT(*) FROM media_downloads
         WHERE chat_id = ?
         GROUP BY status
     ''', (chat_id,))
     rows = cursor.fetchall()
     conn.close()
     return dict(rows)
+
+
+async def get_chat_summary(chat_id: int):
+    return await asyncio.to_thread(_get_chat_summary, chat_id)

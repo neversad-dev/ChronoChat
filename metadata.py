@@ -41,7 +41,7 @@ def get_exif_date(file_path):
         # -s3 gives just the value. We check DateTimeOriginal then CreateDate
         result = subprocess.run(
             ['exiftool', '-DateTimeOriginal', '-CreateDate', '-s3', file_path],
-            capture_output=True, text=True
+            capture_output=True, text=True, timeout=30
         )
         output = result.stdout.strip()
         if output:
@@ -96,14 +96,15 @@ def adjust_media_metadata(file_path, message_date):
         try:
             subprocess.run(
                 [
-                    'exiftool', 
-                    f'-AllDates={date_str}', 
-                    f'-CreationDate={date_str}', 
-                    '-overwrite_original', 
+                    'exiftool',
+                    f'-AllDates={date_str}',
+                    f'-CreationDate={date_str}',
+                    '-overwrite_original',
                     file_path
                 ],
                 capture_output=True,
-                check=True
+                check=True,
+                timeout=30
             )
         except Exception as e:
             print(f"[-] Failed to update EXIF for {filename}: {e}")
