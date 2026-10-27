@@ -180,7 +180,7 @@ async def show_chat_list_paginated(client, initial_search=""):
             else:
                 for i, dialog in enumerate(page_dialogs):
                     title = dialog.title or "Unknown"
-                    if not (dialog.title or "").strip():
+                    if dialog.is_user and getattr(dialog.entity, "deleted", False):
                         title = f"Deleted Account (ID: {dialog.id})"
                     print(f"{start_idx + i + 1}. {title}")
             print("-------------------------")
@@ -226,7 +226,7 @@ async def download_deleted_accounts_media(client):
     all_dialogs = await client.get_dialogs()
     deleted_dialogs = [
         d for d in all_dialogs
-        if not (d.title or "").strip() or "deleted" in (d.title or "").lower()
+        if d.is_user and getattr(d.entity, "deleted", False)
     ]
 
     if not deleted_dialogs:
