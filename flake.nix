@@ -37,6 +37,7 @@
               (pkgs.python312Packages.telethon.overridePythonAttrs (old: { doCheck = false; }))
               pkgs.python312Packages.python-dotenv
               pkgs.python312Packages.questionary
+              pkgs.python312Packages.python-magic
             ];
 
             propagatedBuildInputs = [ pkgs.exiftool pkgs.signalbackup-tools ];
@@ -63,6 +64,7 @@
                 (telethon.overridePythonAttrs (old: { doCheck = false; }))
                 python-dotenv
                 questionary
+                python-magic
               ]))
             ];
 
