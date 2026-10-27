@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -142,6 +143,160 @@ def _show_blob_diagnostic(extracted_dir, total_in_dir):
         print("    Supported: jpg/jpeg, png, gif, bmp, webp, heic, mp4, mov, webm, 3gp, avi, mkv, m4v")
 
 
+def _parse_timestamp(ts):
+    """Parse various timestamp formats."""
+    if ts is None:
+        return None
+    try:
+        if isinstance(ts, (int, float)):
+            # Milliseconds or seconds since epoch
+            if ts > 1e12:
+                return datetime.fromtimestamp(ts / 1000.0)
+            return datetime.fromtimestamp(ts)
+    except (ValueError, OSError, OverflowError):
+        pass
+    return None
+
+
+def _collect_attachments_from_jsonl(jsonl_path):
+    """Parse main.jsonl and return a dict mapping file paths to message timestamps."""
+    attachments = {}
+    try:
+        with open(jsonl_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                # Try to find timestamp
+                ts = None
+                for key in ('timestamp', 'dateSent', 'dateReceived', 'sent_at', 'received_at', 'date'):
+                    if key in msg:
+                        ts = _parse_timestamp(msg[key])
+                        if ts:
+                            break
+
+                # Try to find attachments
+                for att_key in ('attachments', 'attachment', 'media'):
+                    atts = msg.get(att_key, [])
+                    if isinstance(atts, dict):
+                        atts = [atts]
+                    if not isinstance(atts, list):
+                        continue
+                    for att in atts:
+                        if not isinstance(att, dict):
+                            continue
+                        # Find the file path
+                        file_path = None
+                        for path_key in ('path', 'fileName', 'filename', 'uri', 'localPath'):
+                            if path_key in att and att[path_key]:
+                                file_path = str(att[path_key])
+                                break
+                        if not file_path:
+                            continue
+                        # Normalize path
+                        file_path = file_path.lstrip('/')
+                        full_path = os.path.join(os.path.dirname(jsonl_path), file_path)
+                        if file_path not in attachments:
+                            attachments[file_path] = {'paths': set(), 'timestamps': []}
+                        attachments[file_path]['paths'].add(full_path)
+                        if ts:
+                            attachments[file_path]['timestamps'].append(ts)
+
+    except Exception:
+        pass
+
+    # Simplify: pick earliest timestamp and representative path for each attachment
+    result = {}
+    for rel_path, data in attachments.items():
+        best_ts = min(data['timestamps']) if data['timestamps'] else None
+        rep_path = next(iter(data['paths'])) if data['paths'] else None
+        if rep_path:
+            result[rel_path] = {'path': rep_path, 'timestamp': best_ts}
+    return result
+
+
+async def _process_json_export(folder, target_dir):
+    jsonl_path = Path(folder) / "main.jsonl"
+    files_dir = Path(folder) / "files"
+
+    if not jsonl_path.exists():
+        print("[-] main.jsonl not found.")
+        return False
+    if not files_dir.exists():
+        print("[-] files/ directory not found.")
+        return False
+
+    print("[*] Parsing main.jsonl for message timestamps and attachments...")
+    attachments = _collect_attachments_from_jsonl(str(jsonl_path))
+
+    if not attachments:
+        print("[-] No attachments found in main.jsonl.")
+        return False
+
+    print(f"[*] Found {len(attachments)} attachment references.")
+
+    signal_dir = target_dir / "signal"
+    signal_dir.mkdir(parents=True, exist_ok=True)
+
+    semaphore = asyncio.Semaphore(10)
+    tasks = []
+    processed = 0
+    skipped = 0
+    missing = 0
+
+    for rel_path, info in attachments.items():
+        src = Path(info['path'])
+        if not src.exists():
+            missing += 1
+            continue
+
+        if not _is_media_file(src):
+            continue
+
+        dest_path = signal_dir / rel_path
+
+        if dest_path.exists():
+            skipped += 1
+            continue
+
+        os.makedirs(dest_path.parent, exist_ok=True)
+        shutil.copy2(src, dest_path)
+
+        msg_ts = info['timestamp']
+        task = asyncio.create_task(_adjust_single_file_with_timestamp(dest_path, msg_ts, semaphore))
+        tasks.append(task)
+
+        if len(tasks) >= 50:
+            await asyncio.gather(*tasks)
+            processed += len(tasks)
+            tasks = []
+
+    if tasks:
+        await asyncio.gather(*tasks)
+        processed += len(tasks)
+
+    print(f"[+] Processed: {processed}")
+    print(f"[*] Skipped (already exist): {skipped}")
+    if missing:
+        print(f"[*] Missing from disk: {missing}")
+    return processed > 0
+
+
+async def _adjust_single_file_with_timestamp(file_path, message_ts, semaphore):
+    async with semaphore:
+        if message_ts is not None:
+            metadata.adjust_media_metadata(str(file_path), message_ts)
+        else:
+            mtime = os.path.getmtime(file_path)
+            mtime_dt = datetime.fromtimestamp(mtime)
+            metadata.adjust_media_metadata(str(file_path), mtime_dt)
+
+
 async def _import_from_folder():
     print("[*] Import from an already-extracted Signal backup folder.")
 
@@ -152,6 +307,18 @@ async def _import_from_folder():
     target_dir = Path(config.get_download_dir())
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    # Detect if this is a decrypted JSON export
+    jsonl_path = Path(folder) / "main.jsonl"
+    if jsonl_path.exists():
+        print("[*] Detected Signal decrypted JSON export (main.jsonl).")
+        success = await _process_json_export(folder, target_dir)
+        if success:
+            print("[+] Done.")
+        else:
+            print("[-] JSON export import failed.")
+        return
+
+    # Otherwise, try regular extracted media folder
     print("[*] Copying and fixing metadata...")
     success = await _process_extracted_media(folder, target_dir)
     if success:
@@ -184,24 +351,6 @@ async def _import_from_backup():
         print("[*] Copying and fixing metadata...")
         await _process_extracted_media(tmpdir, target_dir)
         print("[+] Done.")
-
-
-async def _import_from_folder():
-    print("[*] Import from an already-extracted Signal backup folder.")
-
-    folder = await _prompt_folder_path()
-    if folder is None:
-        return
-
-    target_dir = Path(config.get_download_dir())
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    print("[*] Copying and fixing metadata...")
-    success = await _process_extracted_media(folder, target_dir)
-    if success:
-        print("[+] Done.")
-    else:
-        print("[-] Import failed. See diagnostic above.")
 
 
 async def signal_backup_menu():
