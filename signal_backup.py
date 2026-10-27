@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import binascii
 import json
 import os
 import shutil
@@ -15,6 +17,23 @@ import metadata
 _MEDIA_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.heic',
     '.mp4', '.mov', '.webm', '.3gp', '.avi', '.mkv', '.m4v'
+}
+
+_MIME_TO_EXT = {
+    'image/jpeg': '.jpg',
+    'image/jpg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/bmp': '.bmp',
+    'image/webp': '.webp',
+    'image/heic': '.heic',
+    'video/mp4': '.mp4',
+    'video/quicktime': '.mov',
+    'video/webm': '.webm',
+    'video/3gpp': '.3gp',
+    'video/x-msvideo': '.avi',
+    'video/x-matroska': '.mkv',
+    'video/x-m4v': '.m4v',
 }
 
 
@@ -71,6 +90,211 @@ async def _adjust_single_file(file_path, semaphore):
         mtime = os.path.getmtime(file_path)
         mtime_dt = datetime.fromtimestamp(mtime)
         metadata.adjust_media_metadata(file_path, mtime_dt)
+
+
+async def _adjust_single_file_with_timestamp(file_path, message_ts, semaphore):
+    async with semaphore:
+        if message_ts is not None:
+            metadata.adjust_media_metadata(str(file_path), message_ts)
+        else:
+            mtime = os.path.getmtime(file_path)
+            mtime_dt = datetime.fromtimestamp(mtime)
+            metadata.adjust_media_metadata(str(file_path), mtime_dt)
+
+
+def _parse_timestamp(ts):
+    """Parse various timestamp formats."""
+    if ts is None:
+        return None
+    try:
+        if isinstance(ts, (int, float)):
+            if ts > 1e12:
+                return datetime.fromtimestamp(ts / 1000.0)
+            return datetime.fromtimestamp(ts)
+        if isinstance(ts, str):
+            # Try parsing as integer string (milliseconds)
+            try:
+                num = int(ts)
+                if num > 1e12:
+                    return datetime.fromtimestamp(num / 1000.0)
+                return datetime.fromtimestamp(num)
+            except ValueError:
+                pass
+            # Try ISO format
+            try:
+                return datetime.fromisoformat(ts.replace('Z', '+00:00'))
+            except ValueError:
+                pass
+    except (ValueError, OSError, OverflowError):
+        pass
+    return None
+
+
+def _hash_to_path(export_dir, plaintext_hash_b64, content_type=None):
+    """Convert base64 plaintextHash to actual file path in files/ directory."""
+    try:
+        decoded = base64.b64decode(plaintext_hash_b64)
+        hex_hash = binascii.hexlify(decoded).decode()
+        prefix = hex_hash[:2]
+
+        ext = ''
+        if content_type:
+            mime_ext = _MIME_TO_EXT.get(content_type.lower())
+            if mime_ext:
+                ext = mime_ext
+
+        if ext:
+            candidate = os.path.join(export_dir, 'files', prefix, hex_hash + ext)
+            if os.path.isfile(candidate):
+                return candidate
+        candidate = os.path.join(export_dir, 'files', prefix, hex_hash)
+        if os.path.isfile(candidate):
+            return candidate
+    except Exception:
+        pass
+    return None
+
+
+def _collect_attachments_from_jsonl(export_dir):
+    """Parse main.jsonl and return list of (src_path, dest_name, timestamp)."""
+    jsonl_path = os.path.join(export_dir, 'main.jsonl')
+    attachments = []
+    seen_paths = set()
+
+    try:
+        with open(jsonl_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                # Only process chat items
+                chat_item = msg.get('chatItem')
+                if not isinstance(chat_item, dict):
+                    continue
+
+                ts = None
+                date_sent = chat_item.get('dateSent')
+                if date_sent:
+                    ts = _parse_timestamp(date_sent)
+
+                standard_msg = chat_item.get('standardMessage', {})
+                if not isinstance(standard_msg, dict):
+                    continue
+
+                atts = standard_msg.get('attachments', [])
+                if isinstance(atts, dict):
+                    atts = [atts]
+                if not isinstance(atts, list):
+                    continue
+
+                for att in atts:
+                    if not isinstance(att, dict):
+                        continue
+                    pointer = att.get('pointer', {})
+                    if not isinstance(pointer, dict):
+                        continue
+
+                    locator = pointer.get('locatorInfo', {})
+                    if not isinstance(locator, dict):
+                        continue
+
+                    hash_b64 = locator.get('plaintextHash')
+                    if not hash_b64:
+                        continue
+
+                    content_type = pointer.get('contentType', '')
+                    file_name = pointer.get('fileName', '')
+
+                    src_path = _hash_to_path(export_dir, hash_b64, content_type)
+                    if not src_path:
+                        continue
+
+                    if file_name:
+                        dest_name = file_name
+                    else:
+                        ext = _MIME_TO_EXT.get(content_type.lower(), '') if content_type else ''
+                        dest_name = hash_b64.replace('/', '_').replace('=', '') + ext
+
+                    if src_path in seen_paths:
+                        continue
+                    seen_paths.add(src_path)
+                    attachments.append((src_path, dest_name, ts))
+
+    except Exception:
+        pass
+
+    return attachments
+
+
+async def _process_json_export(folder, target_dir):
+    jsonl_path = Path(folder) / "main.jsonl"
+    files_dir = Path(folder) / "files"
+
+    if not jsonl_path.exists():
+        print("[-] main.jsonl not found.")
+        return False
+    if not files_dir.exists():
+        print("[-] files/ directory not found.")
+        return False
+
+    print("[*] Parsing main.jsonl for message timestamps and attachments...")
+    attachments = _collect_attachments_from_jsonl(folder)
+
+    if not attachments:
+        print("[-] No attachments found in main.jsonl.")
+        return False
+
+    print(f"[*] Found {len(attachments)} attachment references.")
+
+    signal_dir = target_dir / "signal"
+    signal_dir.mkdir(parents=True, exist_ok=True)
+
+    semaphore = asyncio.Semaphore(10)
+    tasks = []
+    processed = 0
+    skipped = 0
+    missing = 0
+
+    for src_path, dest_name, msg_ts in attachments:
+        src = Path(src_path)
+        if not src.exists():
+            missing += 1
+            continue
+
+        if not _is_media_file(src):
+            continue
+
+        dest_path = signal_dir / dest_name
+
+        if dest_path.exists():
+            skipped += 1
+            continue
+
+        os.makedirs(dest_path.parent, exist_ok=True)
+        shutil.copy2(src, dest_path)
+
+        task = asyncio.create_task(_adjust_single_file_with_timestamp(dest_path, msg_ts, semaphore))
+        tasks.append(task)
+
+        if len(tasks) >= 50:
+            await asyncio.gather(*tasks)
+            processed += len(tasks)
+            tasks = []
+
+    if tasks:
+        await asyncio.gather(*tasks)
+        processed += len(tasks)
+
+    print(f"[+] Processed: {processed}")
+    print(f"[*] Skipped (already exist): {skipped}")
+    if missing:
+        print(f"[*] Missing from disk: {missing}")
+    return processed > 0
 
 
 async def _process_extracted_media(extracted_dir, target_base_dir):
@@ -143,158 +367,30 @@ def _show_blob_diagnostic(extracted_dir, total_in_dir):
         print("    Supported: jpg/jpeg, png, gif, bmp, webp, heic, mp4, mov, webm, 3gp, avi, mkv, m4v")
 
 
-def _parse_timestamp(ts):
-    """Parse various timestamp formats."""
-    if ts is None:
-        return None
-    try:
-        if isinstance(ts, (int, float)):
-            # Milliseconds or seconds since epoch
-            if ts > 1e12:
-                return datetime.fromtimestamp(ts / 1000.0)
-            return datetime.fromtimestamp(ts)
-    except (ValueError, OSError, OverflowError):
-        pass
-    return None
+async def _import_from_backup():
+    print("[*] You need the .backup file from your phone and the 30-digit passphrase.")
 
+    backup_path = await _prompt_backup_path()
+    if backup_path is None:
+        return
+    passphrase = await _prompt_passphrase()
+    if passphrase is None:
+        return
 
-def _collect_attachments_from_jsonl(jsonl_path):
-    """Parse main.jsonl and return a dict mapping file paths to message timestamps."""
-    attachments = {}
-    try:
-        with open(jsonl_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+    target_dir = Path(config.get_download_dir())
+    target_dir.mkdir(parents=True, exist_ok=True)
 
-                # Try to find timestamp
-                ts = None
-                for key in ('timestamp', 'dateSent', 'dateReceived', 'sent_at', 'received_at', 'date'):
-                    if key in msg:
-                        ts = _parse_timestamp(msg[key])
-                        if ts:
-                            break
+    with tempfile.TemporaryDirectory(prefix="chronochat_signal_") as tmpdir:
+        print("[*] Extracting media with signalbackup-tools...")
+        try:
+            _extract_media(backup_path, passphrase, tmpdir)
+        except Exception:
+            print("[-] Extraction failed.")
+            return
 
-                # Try to find attachments
-                for att_key in ('attachments', 'attachment', 'media'):
-                    atts = msg.get(att_key, [])
-                    if isinstance(atts, dict):
-                        atts = [atts]
-                    if not isinstance(atts, list):
-                        continue
-                    for att in atts:
-                        if not isinstance(att, dict):
-                            continue
-                        # Find the file path
-                        file_path = None
-                        for path_key in ('path', 'fileName', 'filename', 'uri', 'localPath'):
-                            if path_key in att and att[path_key]:
-                                file_path = str(att[path_key])
-                                break
-                        if not file_path:
-                            continue
-                        # Normalize path
-                        file_path = file_path.lstrip('/')
-                        full_path = os.path.join(os.path.dirname(jsonl_path), file_path)
-                        if file_path not in attachments:
-                            attachments[file_path] = {'paths': set(), 'timestamps': []}
-                        attachments[file_path]['paths'].add(full_path)
-                        if ts:
-                            attachments[file_path]['timestamps'].append(ts)
-
-    except Exception:
-        pass
-
-    # Simplify: pick earliest timestamp and representative path for each attachment
-    result = {}
-    for rel_path, data in attachments.items():
-        best_ts = min(data['timestamps']) if data['timestamps'] else None
-        rep_path = next(iter(data['paths'])) if data['paths'] else None
-        if rep_path:
-            result[rel_path] = {'path': rep_path, 'timestamp': best_ts}
-    return result
-
-
-async def _process_json_export(folder, target_dir):
-    jsonl_path = Path(folder) / "main.jsonl"
-    files_dir = Path(folder) / "files"
-
-    if not jsonl_path.exists():
-        print("[-] main.jsonl not found.")
-        return False
-    if not files_dir.exists():
-        print("[-] files/ directory not found.")
-        return False
-
-    print("[*] Parsing main.jsonl for message timestamps and attachments...")
-    attachments = _collect_attachments_from_jsonl(str(jsonl_path))
-
-    if not attachments:
-        print("[-] No attachments found in main.jsonl.")
-        return False
-
-    print(f"[*] Found {len(attachments)} attachment references.")
-
-    signal_dir = target_dir / "signal"
-    signal_dir.mkdir(parents=True, exist_ok=True)
-
-    semaphore = asyncio.Semaphore(10)
-    tasks = []
-    processed = 0
-    skipped = 0
-    missing = 0
-
-    for rel_path, info in attachments.items():
-        src = Path(info['path'])
-        if not src.exists():
-            missing += 1
-            continue
-
-        if not _is_media_file(src):
-            continue
-
-        dest_path = signal_dir / rel_path
-
-        if dest_path.exists():
-            skipped += 1
-            continue
-
-        os.makedirs(dest_path.parent, exist_ok=True)
-        shutil.copy2(src, dest_path)
-
-        msg_ts = info['timestamp']
-        task = asyncio.create_task(_adjust_single_file_with_timestamp(dest_path, msg_ts, semaphore))
-        tasks.append(task)
-
-        if len(tasks) >= 50:
-            await asyncio.gather(*tasks)
-            processed += len(tasks)
-            tasks = []
-
-    if tasks:
-        await asyncio.gather(*tasks)
-        processed += len(tasks)
-
-    print(f"[+] Processed: {processed}")
-    print(f"[*] Skipped (already exist): {skipped}")
-    if missing:
-        print(f"[*] Missing from disk: {missing}")
-    return processed > 0
-
-
-async def _adjust_single_file_with_timestamp(file_path, message_ts, semaphore):
-    async with semaphore:
-        if message_ts is not None:
-            metadata.adjust_media_metadata(str(file_path), message_ts)
-        else:
-            mtime = os.path.getmtime(file_path)
-            mtime_dt = datetime.fromtimestamp(mtime)
-            metadata.adjust_media_metadata(str(file_path), mtime_dt)
+        print("[*] Copying and fixing metadata...")
+        await _process_extracted_media(tmpdir, target_dir)
+        print("[+] Done.")
 
 
 async def _import_from_folder():
@@ -325,32 +421,6 @@ async def _import_from_folder():
         print("[+] Done.")
     else:
         print("[-] Import failed. See diagnostic above.")
-
-
-async def _import_from_backup():
-    print("[*] You need the .backup file from your phone and the 30-digit passphrase.")
-
-    backup_path = await _prompt_backup_path()
-    if backup_path is None:
-        return
-    passphrase = await _prompt_passphrase()
-    if passphrase is None:
-        return
-
-    target_dir = Path(config.get_download_dir())
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.TemporaryDirectory(prefix="chronochat_signal_") as tmpdir:
-        print("[*] Extracting media with signalbackup-tools...")
-        try:
-            _extract_media(backup_path, passphrase, tmpdir)
-        except Exception:
-            print("[-] Extraction failed.")
-            return
-
-        print("[*] Copying and fixing metadata...")
-        await _process_extracted_media(tmpdir, target_dir)
-        print("[+] Done.")
 
 
 async def signal_backup_menu():
