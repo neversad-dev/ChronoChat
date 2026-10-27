@@ -260,6 +260,8 @@ async def _process_json_export(folder, target_dir):
     skipped = 0
     missing = 0
 
+    removed = 0
+
     for src_path, dest_name, msg_ts in attachments:
         src = Path(src_path)
         if not src.exists():
@@ -272,11 +274,22 @@ async def _process_json_export(folder, target_dir):
         dest_path = signal_dir / dest_name
 
         if dest_path.exists():
+            # Already imported — remove original to save disk space
+            try:
+                os.remove(src)
+                removed += 1
+            except OSError:
+                pass
             skipped += 1
             continue
 
         os.makedirs(dest_path.parent, exist_ok=True)
         shutil.copy2(src, dest_path)
+        try:
+            os.remove(src)
+            removed += 1
+        except OSError:
+            pass
 
         task = asyncio.create_task(_adjust_single_file_with_timestamp(dest_path, msg_ts, semaphore))
         tasks.append(task)
@@ -292,6 +305,8 @@ async def _process_json_export(folder, target_dir):
 
     print(f"[+] Processed: {processed}")
     print(f"[*] Skipped (already exist): {skipped}")
+    if removed:
+        print(f"[*] Removed from source (disk space): {removed}")
     if missing:
         print(f"[*] Missing from disk: {missing}")
     return processed > 0
