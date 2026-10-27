@@ -4,6 +4,7 @@ import questionary
 import config
 import auth
 import metadata
+import signal_backup
 from telethon import errors
 from telethon.tl.types import InputMessagesFilterPhotoVideo, InputMessagesFilterDocument
 import shutil
@@ -89,7 +90,7 @@ async def download_chat_media(client, dialog):
         if not safe_title:
             safe_title = f"chat_{dialog.id}"
     base_dir = config.get_download_dir()
-    save_dir = os.path.join(base_dir, safe_title)
+    save_dir = os.path.join(base_dir, "telegram", safe_title)
     os.makedirs(save_dir, exist_ok=True)
 
     sem = asyncio.Semaphore(5)
@@ -416,7 +417,7 @@ async def signal_loop():
         ).ask_async()
 
         if action == "import_backup":
-            print("[*] Signal backup support coming soon.")
+            await signal_backup.signal_backup_menu()
         else:
             break
 
