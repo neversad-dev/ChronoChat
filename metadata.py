@@ -41,7 +41,7 @@ def get_exif_date(file_path):
         # -s3 gives just the value. We check DateTimeOriginal then CreateDate
         result = subprocess.run(
             ['exiftool', '-DateTimeOriginal', '-CreateDate', '-s3', file_path],
-            capture_output=True, text=True
+            capture_output=True, text=True, timeout=30
         )
         output = result.stdout.strip()
         if output:

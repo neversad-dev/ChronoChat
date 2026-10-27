@@ -56,7 +56,7 @@ import db
 import asyncio
 
 async def _process_message(client, message, chat_id, save_dir, sem):
-    status = db.get_status(chat_id, message.id)
+    status = await db.get_status(chat_id, message.id)
     if status == 'success':
         return 'skipped'
 
@@ -68,22 +68,26 @@ async def _process_message(client, message, chat_id, save_dir, sem):
             if path:
                 if message.date:
                     metadata.adjust_media_metadata(path, message.date)
-                db.update_status(chat_id, message.id, 'success')
+                await db.update_status(chat_id, message.id, 'success')
                 print(f"[+] Downloaded {os.path.basename(path)}")
                 return 'success'
             else:
-                db.update_status(chat_id, message.id, 'failure', 'Empty path returned')
+                await db.update_status(chat_id, message.id, 'failure', 'Empty path returned')
                 return 'failure'
         except Exception as e:
-            db.update_status(chat_id, message.id, 'failure', str(e))
+            await db.update_status(chat_id, message.id, 'failure', str(e))
             print(f"[-] Failed message {message.id}: {e}")
             return 'failure'
 
 async def download_chat_media(client, dialog):
     print(f"\n[*] Downloading media from '{dialog.title or 'Unknown'}'...")
-    safe_title = "".join([c for c in (dialog.title or "Unknown") if c.isalpha() or c.isdigit() or c in (' ', '-', '_')]).rstrip()
-    if not safe_title:
+    raw_title = dialog.title
+    if not raw_title or not raw_title.strip():
         safe_title = f"chat_{dialog.id}"
+    else:
+        safe_title = "".join([c for c in raw_title if c.isalpha() or c.isdigit() or c in (' ', '-', '_')]).rstrip()
+        if not safe_title:
+            safe_title = f"chat_{dialog.id}"
     base_dir = config.get_download_dir()
     save_dir = os.path.join(base_dir, safe_title)
     os.makedirs(save_dir, exist_ok=True)
@@ -118,7 +122,7 @@ async def download_chat_media(client, dialog):
         await _wait_tasks(0)
 
         # Print summary from database
-        summary = db.get_chat_summary(dialog.id)
+        summary = await db.get_chat_summary(dialog.id)
         success_count = summary.get('success', 0)
         failure_count = summary.get('failure', 0)
         print(f"\n[+] Finished '{dialog.title}'. Total Success: {success_count}, Failures: {failure_count}\n")
@@ -176,6 +180,8 @@ async def show_chat_list_paginated(client, initial_search=""):
             else:
                 for i, dialog in enumerate(page_dialogs):
                     title = dialog.title or "Unknown"
+                    if dialog.is_user and getattr(dialog.entity, "deleted", False):
+                        title = f"Deleted Account (ID: {dialog.id})"
                     print(f"{start_idx + i + 1}. {title}")
             print("-------------------------")
 
@@ -215,6 +221,23 @@ async def show_chat_list_paginated(client, initial_search=""):
     except Exception as e:
         print(f"[-] Failed to fetch dialogs: {e}\n")
 
+async def download_deleted_accounts_media(client):
+    print("\n[*] Scanning for deleted account chats...")
+    all_dialogs = await client.get_dialogs()
+    deleted_dialogs = [
+        d for d in all_dialogs
+        if d.is_user and getattr(d.entity, "deleted", False)
+    ]
+
+    if not deleted_dialogs:
+        print("[-] No deleted account chats found.\n")
+        return
+
+    print(f"[+] Found {len(deleted_dialogs)} deleted account chat(s).")
+    for dialog in deleted_dialogs:
+        await download_chat_media(client, dialog)
+    print("[+] Finished downloading from all deleted account chats.\n")
+
 async def download_media_menu(client):
     """Top‑level menu for downloading media.
     Provides options to view all chats, search, download all media,
@@ -227,6 +250,7 @@ async def download_media_menu(client):
                 questionary.Choice("Show all chats", "show_chats"),
                 questionary.Choice("Search", "search"),
                 questionary.Choice("Download all media", "download_all"),
+                questionary.Choice("Download from Deleted Accounts", "download_deleted"),
                 questionary.Choice("Back", "back"),
                 questionary.Choice("Exit", "exit"),
             ],
@@ -244,6 +268,8 @@ async def download_media_menu(client):
             for dlg in dialogs:
                 await download_chat_media(client, dlg)
             print("[+] Finished downloading all chats.")
+        elif action == "download_deleted":
+            await download_deleted_accounts_media(client)
         elif action == "back":
             break
         elif action == "exit":

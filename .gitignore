@@ -11,6 +11,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+# macOS
+.DS_Store
+
 # Nix build inputs & artifacts
 .direnv/
 result

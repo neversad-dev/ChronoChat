@@ -66,7 +66,7 @@
             ];
 
             shellHook = ''
-              echo "Welcome to the Python Hello World dev shell!"
+              echo "Welcome to the ChronoChat dev shell!"
               python3 --version
             '';
           };
