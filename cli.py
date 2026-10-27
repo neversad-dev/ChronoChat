@@ -291,18 +291,17 @@ async def handle_settings(client=None, is_auth=False, has_creds=True):
         else:
             break
 
-async def main_loop():
-    print("Welcome to ChronoChat Terminal Menu!")
+async def telegram_loop():
     while True:
         api_id, api_hash = config.get_credentials()
         
         if not api_id or not api_hash:
             action = await questionary.select(
-                "ChronoChat - No Credentials",
+                "ChronoChat - Telegram (No Credentials)",
                 choices=[
                     questionary.Choice("Set App Credentials", "set_creds"),
                     questionary.Choice("Settings", "settings"),
-                    questionary.Choice("Exit", "exit")
+                    questionary.Choice("Back", "back")
                 ]
             ).ask_async()
             
@@ -325,7 +324,7 @@ async def main_loop():
                     "Error Menu",
                     choices=[
                         questionary.Choice("Settings", "settings"),
-                        questionary.Choice("Exit", "exit")
+                        questionary.Choice("Back", "back")
                     ]
                 ).ask_async()
                 if action == "settings":
@@ -340,11 +339,11 @@ async def main_loop():
                 
                 if not is_auth:
                     action = await questionary.select(
-                        "ChronoChat - Not Logged In",
+                        "ChronoChat - Telegram (Not Logged In)",
                         choices=[
                             questionary.Choice("Log In", "login"),
                             questionary.Choice("Settings", "settings"),
-                            questionary.Choice("Exit", "exit")
+                            questionary.Choice("Back", "back")
                         ]
                     ).ask_async()
                     
@@ -359,11 +358,11 @@ async def main_loop():
                 else:
                     me = await client.get_me()
                     action = await questionary.select(
-                        f"ChronoChat - Logged In ({me.first_name})",
+                        f"ChronoChat - Telegram ({me.first_name})",
                         choices=[
                             questionary.Choice("Download Media", "download_media"),
                             questionary.Choice("Settings", "settings"),
-                            questionary.Choice("Exit", "exit")
+                            questionary.Choice("Back", "back")
                         ]
                     ).ask_async()
                     
@@ -378,3 +377,46 @@ async def main_loop():
             finally:
                 if client:
                     await client.disconnect()
+
+
+async def signal_loop():
+    while True:
+        action = await questionary.select(
+            "ChronoChat - Signal",
+            choices=[
+                questionary.Choice("Import from Android Backup", "import_backup"),
+                questionary.Choice("Back", "back"),
+            ]
+        ).ask_async()
+
+        if action == "import_backup":
+            print("[*] Signal backup support coming soon.")
+        else:
+            break
+
+
+async def main_loop():
+    print("Welcome to ChronoChat Terminal Menu!")
+    while True:
+        action = await questionary.select(
+            "ChronoChat",
+            choices=[
+                questionary.Choice("Telegram", "telegram"),
+                questionary.Choice("Signal", "signal"),
+                questionary.Choice("Settings", "settings"),
+                questionary.Choice("Exit", "exit")
+            ]
+        ).ask_async()
+
+        if action == "telegram":
+            await telegram_loop()
+        elif action == "signal":
+            await signal_loop()
+        elif action == "settings":
+            api_id, api_hash = config.get_credentials()
+            has_creds = bool(api_id and api_hash)
+            res = await handle_settings(None, is_auth=False, has_creds=has_creds)
+            if res == "break":
+                continue
+        else:
+            break
