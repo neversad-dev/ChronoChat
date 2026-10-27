@@ -1,96 +1,106 @@
 # ChronoChat
 [![GitHub license](https://img.shields.io/github/license/neversad-dev/ChronoChat)](LICENSE)
 [![GitHub issues](https://img.shields.io/github/issues/neversad-dev/ChronoChat)](https://github.com/neversad-dev/ChronoChat/issues)
-[![Python](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org)
+[![Python](https://img.shields.io/badge/python-3.12-blue)](https://www.python.org)
 
-**Note:** This is a proof-of-concept and not a fully working application.
-
-## Table of Contents
-- [Prerequisites](#prerequisites)
-- [Credentials Setup](#credentials-setup)
-- [Usage](#usage)
-- [Roadmap](#roadmap)
-- [License](#license)
-
-A Python application for interacting with the Telegram API using Telethon, managed via a multiplatform Nix dev shell. ChronoChat downloads media from your chats and automatically corrects timestamps so they appear correctly in Google Photos.
+A Python application for interacting with messaging platforms via a terminal UI. Download media from your chats and automatically correct timestamps so they appear correctly in photo libraries.
 
 ## Features
-- Default download location `~/Downloads/chronochat` (configurable via Settings).
-- Interactive terminal menu with Settings (change download directory, clear credentials, log out).
-- Metadata correction for images **and videos** using bundled `exiftool` (earliest date from message, filename, or existing metadata).
-- **Concurrent Media Downloading**: Uses asynchronous semaphores to download multiple files simultaneously while avoiding Telegram's rate limits.
-- **Resilient State Tracking**: Maintains a built-in SQLite database (`~/.config/chronochat/downloads.db`) to track successful downloads. You can safely interrupt a large download with `Ctrl+C` and instantly resume later without re-downloading a single file.
+- **Telegram**: Download all media from chats with resume support via an embedded SQLite database. Corrects timestamps using message date, filename patterns, and EXIF data.
+- **Signal Android Backup Import**: Import media from Signal backups or extracted folders, including decrypted JSON exports.
+- **Concurrent Media Downloading**: Uses asynchronous semaphores to download multiple files simultaneously while respecting rate limits.
+- **Resilient State Tracking**: Maintains a built-in SQLite database (`~/.config/chronochat/downloads.db`) to track successful downloads. You can safely interrupt a large download with `Ctrl+C` and resume later without re-downloading files.
+- **Vim-style navigation**: Navigate menus with `hjkl` keys and letter shortcuts.
+- **Configurable download directory** stored in your local config.
 
 ## Prerequisites
 
 - [Nix](https://nixos.org/download) package manager with [Flakes enabled](https://nixos.wiki/wiki/Flakes#Enable_flakes).
 
-## Credentials Setup
+## Credentials Setup (Telegram)
 
 To use the Telegram API, you must register your application to obtain an `api_id` and `api_hash`.
 
-1. Go to [my.telegram.org](https://my.telegram.org/) and log in with your phone number associated with your Telegram account.
+1. Go to [my.telegram.org](https://my.telegram.org/) and log in with your phone number.
 2. Click on **API development tools**.
 3. Fill out the application form:
-   - **App title**: Choose any name (e.g., `MyMediaDownloader`).
+   - **App title**: Choose any name.
    - **Short name**: Choose any short alphanumeric name.
-   - **URL/Description**: You can leave these blank or use placeholders.
 4. Click **Create application**.
-5. Once created, keep your **App api_id** and **App api_hash** values handy.
+5. Keep your **App api_id** and **App api_hash** values handy.
 
 ## Usage
 
-### 1. Run the Application Directly
+### Run the Application
 
-Because this project is packaged as a Nix Flake, you don't even need to clone the repository to run it. If you have Nix installed, you can launch ChronoChat directly from GitHub:
-
+Launch ChronoChat directly from GitHub:
 ```bash
 nix run github:neversad-dev/ChronoChat
 ```
 
 **Local Development Run:**
-If you have cloned the repository locally, you can run the application directly from the project directory:
 ```bash
 nix run .#
 ```
 
-### 2. Local Development Environment
-
-If you are developing or modifying the codebase, you can drop into a shell containing Python and the required libraries by running:
-
+**Development Shell:**
 ```bash
 nix develop
-```
-
-Upon entering, you will see a welcome message. You can then execute the main script normally:
-
-```bash
 python3 main.py
 ```
 
-### 3. Interactive Terminal Menu
+### Navigation
 
-ChronoChat now features a rich, interactive terminal menu that automatically adapts to your current session state:
+All menus use vim-style keybindings:
 
-- **No Credentials**: Prompts for your `api_id` and `api_hash`, which are actively validated and securely saved in your local configuration directory (e.g., `~/.config/chronochat/config.env`).
-- **Not Logged In**: Prompts you to log in. Enter your phone number, the login code sent to your Telegram, and your Two-Step Verification password if enabled.
-- **Logged In**: 
-  - **Show Chat List**: Fetch and browse all your chats dynamically. Chats are paginated (10 per page) for easy viewing. You can use the **Search** feature to quickly filter chats by their name.
-  - **Log Out**: Securely disconnect and destroy your local session.
+| Key | Action |
+|-----|--------|
+| `↑` / `k` | Move selection up |
+| `↓` / `j` | Move selection down |
+| `←` / `h` | Go back to previous menu |
+| `→` / `l` or `Enter` | Select current item |
+| Letter shortcut (`[t]`, `[s]`, etc.) | Jump directly to item |
+| `.` | Open Settings (from any screen) |
+| `q` | Quit program immediately |
 
-This interactive menu uses `questionary` for smooth arrow-key navigation and intuitive prompts. Future runs will load your authenticated configuration automatically without any login prompts.
+Text prompts show `[Ctrl+C] Cancel` at the bottom. Pressing `Ctrl+C` at any prompt safely cancels and returns to the menu.
 
-## Roadmap
+### Menu Structure
 
-- ✅ Proof of concept using Telethon
-- ✅ Package as a Nix flake app for global installation
-- ✅ Securely manage user credentials (XDG config)
-- ✅ Download media from chats (with date/chat filter controls)
-- ✅ Add EXIF tool to modify media metadata
-- 🌐 Support other messengers
+- **Telegram**
+  - Set API Credentials (if not configured)
+  - Log In (if not authenticated)
+  - **Show all chats** — browse paginated chat list
+  - **Search** — filter chats by name
+  - **Download all media** — download from every chat
+  - **Download from Deleted Accounts** — find and download from deleted account chats
+- **Signal Import Source**
+  - Import from `.backup` file
+  - Import from extracted folder (supports JSON exports and raw media folders)
+- **Settings**
+  - Change Download Directory
+  - Clear Telegram App Credentials
+  - Log Out
+
+## How Timestamp Correction Works
+
+Media files are processed to find the earliest reasonable date from:
+1. **Message date** from Telegram (converted to local time)
+2. **Filename date** (patterns like `IMG_YYYYMMDD_HHMMSS` or WhatsApp format)
+3. **Existing EXIF metadata**
+
+The earliest valid date wins. The file's modification time is always updated. If the best date differs from existing EXIF by more than one hour, the EXIF data is rewritten as well.
+
+## Signal Backup Import
+
+### From `.backup` file
+Requires the encrypted `.backup` file from Signal (Settings → Chats → Backups) plus the 30-digit passphrase. The tool uses `signalbackup-tools` to extract attachments, then applies timestamp correction.
+
+### From extracted folder
+Supports:
+- **Decrypted JSON export** (`main.jsonl` + `files/` directory) — parsed for message timestamps
+- **Raw extracted media** — metadata is inferred from file modification time
 
 ## License
 
 This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
-
-

@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import questionary
+from menu import menu_select, ask_text
 
 import config
 import metadata
@@ -71,7 +72,7 @@ def _is_media_file(path):
 
 async def _prompt_backup_path():
     while True:
-        backup_path = await questionary.text("Path to Signal backup file (.backup)").ask_async()
+        backup_path = await ask_text("Path to Signal backup file (.backup)")
         if backup_path is None:
             return None
         if backup_path and os.path.isfile(backup_path):
@@ -81,7 +82,7 @@ async def _prompt_backup_path():
 
 async def _prompt_passphrase():
     while True:
-        raw = await questionary.password("Signal 30-digit backup passphrase (spaces/hyphens OK)").ask_async()
+        raw = await ask_text("Signal 30-digit backup passphrase (spaces/hyphens OK)", password=True)
         if raw is None:
             return None
         cleaned = ''.join(c for c in raw if c.isdigit())
@@ -92,7 +93,7 @@ async def _prompt_passphrase():
 
 async def _prompt_folder_path():
     while True:
-        folder = await questionary.text("Path to extracted Signal folder (e.g. containing files/)").ask_async()
+        folder = await ask_text("Path to extracted Signal folder (e.g. containing files/)")
         if folder is None:
             return None
         expanded = os.path.expanduser(folder)
@@ -466,21 +467,29 @@ async def _import_from_folder():
         print("[-] Import failed. See diagnostic above.")
 
 
-async def signal_backup_menu():
-    print("[*] Signal Android Backup Import")
+async def signal_backup_menu(settings_handler=None):
+    """Signal backup import menu. Loops until user goes back.
+    settings_handler: async callable to open Settings (e.g. functools.partial(handle_settings, ...))
+    """
+    while True:
+        action = await menu_select(
+            "Signal Import Source",
+            choices=[
+                questionary.Choice("Import from .backup file", "from_backup"),
+                questionary.Choice("Import from extracted folder", "from_folder"),
+            ],
+            shortcuts=["b", "f"],
+            settings_line=True,
+        )
 
-    action = await questionary.select(
-        "Signal Import Source",
-        choices=[
-            questionary.Choice("Import from .backup file", "from_backup"),
-            questionary.Choice("Import from extracted folder", "from_folder"),
-            questionary.Choice("Back", "back"),
-        ]
-    ).ask_async()
-
-    if action == "back" or action is None:
-        return
-    elif action == "from_backup":
-        await _import_from_backup()
-    elif action == "from_folder":
-        await _import_from_folder()
+        if action == "__back__" or action is None:
+            break
+        elif action == "__settings__":
+            if settings_handler:
+                res = await settings_handler()
+                if res == "break":
+                    continue
+        elif action == "from_backup":
+            await _import_from_backup()
+        elif action == "from_folder":
+            await _import_from_folder()

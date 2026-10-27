@@ -1,24 +1,26 @@
 import os
 import sys
+import asyncio
 import questionary
 import config
 import auth
 import metadata
 import signal_backup
+import db
+from menu import menu_select, ask_text, ask_confirm
 from telethon import errors
 from telethon.tl.types import InputMessagesFilterPhotoVideo, InputMessagesFilterDocument
-import shutil
 
 async def prompt_credentials():
     print("\n[!] Please enter your Telegram API credentials.")
     print("[!] Get them from https://my.telegram.org/ \n")
     
-    api_id_str = await questionary.text("Enter your App api_id (integer):").ask_async()
+    api_id_str = await ask_text("Enter your App api_id (integer):")
     if not api_id_str or not api_id_str.isdigit():
         print("[-] Invalid api_id. It must be an integer.")
         return
 
-    api_hash = await questionary.text("Enter your App api_hash (string):").ask_async()
+    api_hash = await ask_text("Enter your App api_hash (string):")
     if not api_hash:
         print("[-] api_hash cannot be empty.")
         return
@@ -35,26 +37,23 @@ async def prompt_credentials():
 
 async def handle_login(client):
     print("\n[+] Initiating login sequence...")
-    phone = await questionary.text("Enter your phone number (e.g. +1234567890):").ask_async()
+    phone = await ask_text("Enter your phone number (e.g. +1234567890):")
     if not phone: return
     
     try:
         await client.send_code_request(phone)
-        code = await questionary.text("Enter the code you received:").ask_async()
+        code = await ask_text("Enter the code you received:")
         
         try:
             await client.sign_in(phone, code)
         except errors.SessionPasswordNeededError:
-            password = await questionary.password("Two-step verification is enabled. Enter your password:").ask_async()
+            password = await ask_text("Two-step verification is enabled. Enter your password:", password=True)
             await client.sign_in(password=password)
             
         me = await client.get_me()
         print(f"[+] Logged in successfully as {me.first_name}!\n")
     except Exception as e:
         print(f"[-] Login failed: {e}\n")
-
-import db
-import asyncio
 
 async def _process_message(client, message, chat_id, save_dir, sem):
     status = await db.get_status(chat_id, message.id)
@@ -131,10 +130,8 @@ async def download_chat_media(client, dialog):
         print(f"[-] Fatal error during chat download: {e}\n")
 
 async def show_chat_list_paginated(client, initial_search=""):
-    """Display a paginated list of chats with minimal actions.
-    Allows navigating pages, downloading media from a selected chat,
-    and returning to the previous menu. Supports an optional initial
-    search query.
+    """Display a paginated list of chats. Navigate with arrow keys / jk,
+    press the number shown to select a chat, or use n/p for pages.
     """
     try:
         print("\n[+] Fetching dialogs...")
@@ -146,12 +143,7 @@ async def show_chat_list_paginated(client, initial_search=""):
 
         search_query = initial_search
         current_page = 0
-        # Determine page size based on terminal height, reserving lines for UI elements
-        try:
-            term_rows = shutil.get_terminal_size().lines
-        except Exception:
-            term_rows = 24
-        PAGE_SIZE = max(10, term_rows - 14)
+        PAGE_SIZE = 10
 
         while True:
             dialogs = (
@@ -167,58 +159,54 @@ async def show_chat_list_paginated(client, initial_search=""):
                 current_page = 0
 
             start_idx = current_page * PAGE_SIZE
-            end_idx = start_idx + PAGE_SIZE
-            page_dialogs = dialogs[start_idx:end_idx]
+            page_dialogs = dialogs[start_idx : start_idx + PAGE_SIZE]
 
-            header = f"\n--- Chats (Page {current_page + 1}/{total_pages})"
+            header = f"--- Chats (Page {current_page + 1}/{total_pages})"
             if search_query:
                 header += f" [Search: '{search_query}']"
             header += " ---"
-            print(header)
 
-            if not page_dialogs:
-                print("[-] No chats match your search.")
-            else:
-                for i, dialog in enumerate(page_dialogs):
-                    title = dialog.title or "Unknown"
-                    if dialog.is_user and getattr(dialog.entity, "deleted", False):
-                        title = f"Deleted Account (ID: {dialog.id})"
-                    print(f"{start_idx + i + 1}. {title}")
-            print("-------------------------")
+            page_choices = []
+            page_shortcuts = []
+            for i, dialog in enumerate(page_dialogs):
+                title = dialog.title or "Unknown"
+                if dialog.is_user and getattr(dialog.entity, "deleted", False):
+                    title = f"Deleted Account (ID: {dialog.id})"
+                page_choices.append(questionary.Choice(title, dialog))
+                # Number 1-9,0 to match top keyboard row
+                page_shortcuts.append(str((i + 1) % 10))
 
-            inner_choices = []
-            if current_page < total_pages - 1:
-                inner_choices.append(questionary.Choice("Next Page", "next"))
-            if current_page > 0:
-                inner_choices.append(questionary.Choice("Previous Page", "prev"))
-            inner_choices.append(questionary.Choice("Download Media from Chat", "download_media"))
-            inner_choices.append(questionary.Choice("Back", "back"))
-            inner_choices.append(questionary.Choice("Exit", "exit"))
+            if not page_choices:
+                page_choices.append(questionary.Choice("(No chats found)", "__empty__"))
+                page_shortcuts.append("")
 
-            action = await questionary.select(
-                "Select action:",
-                choices=inner_choices
-            ).ask_async()
+            action = await menu_select(
+                header,
+                choices=page_choices,
+                shortcuts=page_shortcuts,
+                page_nav={"has_prev": current_page > 0, "has_next": current_page < total_pages - 1},
+                settings_line=True,
+            )
 
-            if action == "next":
+            if action == "__next__":
                 current_page += 1
-            elif action == "prev":
+            elif action == "__prev__":
                 current_page -= 1
-            elif action == "download_media":
-                chat_num = await questionary.text("Enter chat number from the list above:").ask_async()
-                if chat_num and chat_num.isdigit():
-                    idx = int(chat_num) - 1
-                    if start_idx <= idx < end_idx:
-                        dialog = dialogs[idx]
-                        await download_chat_media(client, dialog)
-                    else:
-                        print("[-] Invalid chat number. Please enter a number visible on the current page.")
-                else:
-                    print("[-] Invalid input.")
-            elif action == "back":
+            elif action == "__settings__":
+                res = await handle_settings(client, is_auth=True, has_creds=True)
+                if res == "break":
+                    return "break"
+                # Normal back from Settings: loop continues, preserving page/search
+            elif action == "__back__":
                 break
-            elif action == "exit":
-                sys.exit(0)
+            elif action == "__empty__":
+                pass
+            else:
+                # A dialog object was selected
+                dialog = action
+                confirm = await ask_confirm(f"Download media from '{dialog.title or 'Unknown'}'?")
+                if confirm:
+                    await download_chat_media(client, dialog)
     except Exception as e:
         print(f"[-] Failed to fetch dialogs: {e}\n")
 
@@ -239,45 +227,8 @@ async def download_deleted_accounts_media(client):
         await download_chat_media(client, dialog)
     print("[+] Finished downloading from all deleted account chats.\n")
 
-async def download_media_menu(client):
-    """Top‑level menu for downloading media.
-    Provides options to view all chats, search, download all media,
-    go back to the previous menu, or exit the application.
-    """
-    while True:
-        action = await questionary.select(
-            "Download Media Menu:",
-            choices=[
-                questionary.Choice("Show all chats", "show_chats"),
-                questionary.Choice("Search", "search"),
-                questionary.Choice("Download all media", "download_all"),
-                questionary.Choice("Download from Deleted Accounts", "download_deleted"),
-                questionary.Choice("Back", "back"),
-                questionary.Choice("Exit", "exit"),
-            ],
-        ).ask_async()
-
-        if action == "show_chats":
-            await show_chat_list_paginated(client)
-        elif action == "search":
-            query = await questionary.text("Enter search query:").ask_async()
-            if query:
-                await show_chat_list_paginated(client, initial_search=query)
-        elif action == "download_all":
-            print("[*] Downloading media from all chats...")
-            dialogs = await client.get_dialogs()
-            for dlg in dialogs:
-                await download_chat_media(client, dlg)
-            print("[+] Finished downloading all chats.")
-        elif action == "download_deleted":
-            await download_deleted_accounts_media(client)
-        elif action == "back":
-            break
-        elif action == "exit":
-            sys.exit(0)
-
 async def handle_logout(client):
-    confirm = await questionary.confirm("Are you sure you want to log out?").ask_async()
+    confirm = await ask_confirm("Are you sure you want to log out?")
     if confirm:
         await client.log_out()
         print("[+] Logged out successfully!\n")
@@ -288,20 +239,19 @@ async def handle_settings(client=None, is_auth=False, has_creds=True):
         choices = [
             questionary.Choice(f"Change Download Directory (Current: {current_dir})", "change_dir"),
         ]
+        shortcuts = ["d"]
         if has_creds:
-            choices.append(questionary.Choice("Clear App Credentials", "clear_creds"))
-        if is_auth:
-            choices.append(questionary.Choice("Log Out", "logout"))
-            
-        choices.append(questionary.Choice("Back", "back"))
+            choices.append(questionary.Choice("Clear Telegram App Credentials", "clear_creds"))
+            shortcuts.append("c")
 
-        action = await questionary.select(
+        action = await menu_select(
             "Settings Menu",
-            choices=choices
-        ).ask_async()
+            choices=choices,
+            shortcuts=shortcuts,
+        )
 
         if action == "change_dir":
-            new_dir = await questionary.text("Enter new download directory path:").ask_async()
+            new_dir = await ask_text("Enter new download directory path:")
             if new_dir:
                 expanded_dir = os.path.expanduser(new_dir)
                 config.set_download_dir(expanded_dir)
@@ -312,10 +262,7 @@ async def handle_settings(client=None, is_auth=False, has_creds=True):
             config.clear_credentials()
             print("[+] Credentials cleared.\n")
             return "break"
-        elif action == "logout":
-            await handle_logout(client)
-            return "break"
-        else:
+        elif action == "__back__":
             break
 
 async def telegram_loop():
@@ -323,22 +270,22 @@ async def telegram_loop():
         api_id, api_hash = config.get_credentials()
         
         if not api_id or not api_hash:
-            action = await questionary.select(
+            action = await menu_select(
                 "ChronoChat - Telegram (No Credentials)",
                 choices=[
                     questionary.Choice("Set App Credentials", "set_creds"),
-                    questionary.Choice("Settings", "settings"),
-                    questionary.Choice("Back", "back")
-                ]
-            ).ask_async()
+                ],
+                shortcuts=["c"],
+                settings_line=True,
+            )
             
             if action == "set_creds":
                 await prompt_credentials()
-            elif action == "settings":
+            elif action in ("settings", "__settings__"):
                 res = await handle_settings(None, is_auth=False, has_creds=False)
                 if res == "break":
                     continue
-            else:
+            elif action == "__back__":
                 break
         else:
             print("[*] Connecting to Telegram...")
@@ -346,104 +293,112 @@ async def telegram_loop():
             try:
                 client = await auth.get_client(api_id, api_hash)
             except Exception as e:
-                print(f"[-] Failed to initialize client. Your credentials might be invalid or network is down. Error: {e}")
-                action = await questionary.select(
-                    "Error Menu",
-                    choices=[
-                        questionary.Choice("Settings", "settings"),
-                        questionary.Choice("Back", "back")
-                    ]
-                ).ask_async()
-                if action == "settings":
+                action = await menu_select(
+                    f"[-] Failed to initialize client. Your credentials might be invalid or network is down.\n    Error: {e}",
+                    choices=[],
+                    shortcuts=[],
+                    settings_line=True,
+                )
+                if action in ("settings", "__settings__"):
                     res = await handle_settings(None, is_auth=False, has_creds=True)
                     if res == "break":
                         continue
-                else:
+                elif action == "__back__":
                     break
 
             try:
                 is_auth = await auth.is_authorized(client)
                 
                 if not is_auth:
-                    action = await questionary.select(
+                    action = await menu_select(
                         "ChronoChat - Telegram (Not Logged In)",
                         choices=[
                             questionary.Choice("Log In", "login"),
-                            questionary.Choice("Settings", "settings"),
-                            questionary.Choice("Back", "back")
-                        ]
-                    ).ask_async()
+                        ],
+                        shortcuts=["i"],
+                        settings_line=True,
+                    )
                     
                     if action == "login":
                         await handle_login(client)
-                    elif action == "settings":
+                    elif action in ("settings", "__settings__"):
                         res = await handle_settings(client, is_auth=False, has_creds=True)
                         if res == "break":
                             continue
-                    else:
+                    elif action == "__back__":
                         break
                 else:
                     me = await client.get_me()
-                    action = await questionary.select(
+                    action = await menu_select(
                         f"ChronoChat - Telegram ({me.first_name})",
                         choices=[
-                            questionary.Choice("Download Media", "download_media"),
-                            questionary.Choice("Settings", "settings"),
-                            questionary.Choice("Back", "back")
-                        ]
-                    ).ask_async()
-                    
-                    if action == "download_media":
-                        await download_media_menu(client)
-                    elif action == "settings":
+                            questionary.Choice("Show all chats", "show_chats"),
+                            questionary.Choice("Search", "search"),
+                            questionary.Choice("Download all media", "download_all"),
+                            questionary.Choice("Download from Deleted Accounts", "download_deleted"),
+                            questionary.Choice("Log Out", "logout"),
+                        ],
+                        shortcuts=["a", "f", "d", "x", "o"],
+                        settings_line=True,
+                    )
+
+                    res = None
+                    if action == "show_chats":
+                        res = await show_chat_list_paginated(client)
+                    elif action == "search":
+                        query = await ask_text("Enter search query:")
+                        if query:
+                            res = await show_chat_list_paginated(client, initial_search=query)
+                    elif action == "download_all":
+                        print("[*] Downloading media from all chats...")
+                        dialogs = await client.get_dialogs()
+                        for dlg in dialogs:
+                            await download_chat_media(client, dlg)
+                        print("[+] Finished downloading all chats.")
+                    elif action == "download_deleted":
+                        await download_deleted_accounts_media(client)
+                    elif action == "logout":
+                        await handle_logout(client)
+                        continue
+                    elif action in ("settings", "__settings__"):
                         res = await handle_settings(client, is_auth=True, has_creds=True)
-                        if res == "break":
-                            continue
-                    else:
+                    elif action == "__back__":
                         break
+
+                    if res == "break":
+                        continue
             finally:
                 if client:
                     await client.disconnect()
 
 
-async def signal_loop():
-    while True:
-        action = await questionary.select(
-            "ChronoChat - Signal",
-            choices=[
-                questionary.Choice("Import from Android Backup", "import_backup"),
-                questionary.Choice("Back", "back"),
-            ]
-        ).ask_async()
-
-        if action == "import_backup":
-            await signal_backup.signal_backup_menu()
-        else:
-            break
-
-
 async def main_loop():
     print("Welcome to ChronoChat Terminal Menu!")
     while True:
-        action = await questionary.select(
+        action = await menu_select(
             "ChronoChat",
             choices=[
                 questionary.Choice("Telegram", "telegram"),
                 questionary.Choice("Signal", "signal"),
-                questionary.Choice("Settings", "settings"),
-                questionary.Choice("Exit", "exit")
-            ]
-        ).ask_async()
+            ],
+            shortcuts=["t", "s"],
+            settings_line=True,
+        )
 
         if action == "telegram":
             await telegram_loop()
         elif action == "signal":
-            await signal_loop()
-        elif action == "settings":
+            from functools import partial
+            api_id, api_hash = config.get_credentials()
+            has_creds = bool(api_id and api_hash)
+            await signal_backup.signal_backup_menu(
+                settings_handler=partial(handle_settings, None, is_auth=False, has_creds=has_creds)
+            )
+        elif action in ("settings", "__settings__"):
             api_id, api_hash = config.get_credentials()
             has_creds = bool(api_id and api_hash)
             res = await handle_settings(None, is_auth=False, has_creds=has_creds)
             if res == "break":
                 continue
-        else:
+        elif action == "__back__":
             break

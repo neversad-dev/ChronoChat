@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv, set_key
+from dotenv import set_key
 
 APP_NAME = "chronochat"
 

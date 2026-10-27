@@ -1,5 +1,5 @@
 {
-  description = "A simple python hello world project with Nix flakes";
+  description = "ChronoChat — a terminal client for downloading and importing chat media with timestamp correction";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -24,7 +24,7 @@
         {
           default = pkgs.python312Packages.buildPythonApplication {
             pname = "chronochat";
-            version = "0.2.0";
+            version = "1.0.0";
             pyproject = true;
 
             src = ./.;
