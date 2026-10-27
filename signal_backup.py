@@ -8,35 +8,12 @@ from pathlib import Path
 
 import questionary
 
-try:
-    import magic
-    _HAS_MAGIC = True
-except ImportError:
-    _HAS_MAGIC = False
-
 import config
 import metadata
 
 _MEDIA_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.heic',
     '.mp4', '.mov', '.webm', '.3gp', '.avi', '.mkv', '.m4v'
-}
-
-_MIME_TO_EXT = {
-    'image/jpeg': '.jpg',
-    'image/jpg': '.jpg',
-    'image/png': '.png',
-    'image/gif': '.gif',
-    'image/bmp': '.bmp',
-    'image/webp': '.webp',
-    'image/heic': '.heic',
-    'video/mp4': '.mp4',
-    'video/quicktime': '.mov',
-    'video/webm': '.webm',
-    'video/3gpp': '.3gp',
-    'video/x-msvideo': '.avi',
-    'video/x-matroska': '.mkv',
-    'video/x-m4v': '.m4v',
 }
 
 
@@ -165,6 +142,24 @@ def _show_blob_diagnostic(extracted_dir, total_in_dir):
         print("    Supported: jpg/jpeg, png, gif, bmp, webp, heic, mp4, mov, webm, 3gp, avi, mkv, m4v")
 
 
+async def _import_from_folder():
+    print("[*] Import from an already-extracted Signal backup folder.")
+
+    folder = await _prompt_folder_path()
+    if folder is None:
+        return
+
+    target_dir = Path(config.get_download_dir())
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    print("[*] Copying and fixing metadata...")
+    success = await _process_extracted_media(folder, target_dir)
+    if success:
+        print("[+] Done.")
+    else:
+        print("[-] Import failed. See diagnostic above.")
+
+
 async def _import_from_backup():
     print("[*] You need the .backup file from your phone and the 30-digit passphrase.")
 
@@ -191,82 +186,6 @@ async def _import_from_backup():
         print("[+] Done.")
 
 
-def _is_signal_blob_backup(extracted_dir):
-    blob_count = sum(
-        1 for _, _, files in os.walk(extracted_dir) for f in files if '.' not in f
-    )
-    total = sum(len(files) for _, _, files in os.walk(extracted_dir))
-    return total > 0 and blob_count > total * 0.8
-
-
-async def _import_from_blobs(folder):
-    if not _HAS_MAGIC:
-        print("[-] python-magic is required for content-based recovery.")
-        print("    Install it or run inside the Nix devShell (nix develop).")
-        return
-
-    print("[*] Scanning blob files with content-based MIME detection...")
-    print("[!] Warning: Dates will be approximate (backup export time).")
-
-    target_dir = Path(config.get_download_dir())
-    signal_dir = target_dir / "signal"
-    signal_dir.mkdir(parents=True, exist_ok=True)
-
-    mime = magic.Magic(mime=True)
-    found = 0
-    processed = 0
-    skipped = 0
-    unknown_mimes = set()
-    semaphore = asyncio.Semaphore(10)
-    tasks = []
-
-    for root, _, files in os.walk(folder):
-        for filename in files:
-            src = Path(root) / filename
-            if src.is_symlink():
-                continue
-
-            try:
-                detected = mime.from_file(str(src))
-            except Exception:
-                continue
-
-            ext = _MIME_TO_EXT.get(detected)
-            if not ext:
-                unknown_mimes.add(detected)
-                continue
-
-            found += 1
-            dest_name = filename + ext
-            dest_path = signal_dir / dest_name
-
-            if dest_path.exists():
-                skipped += 1
-                continue
-
-            shutil.copy2(src, dest_path)
-
-            task = asyncio.create_task(_adjust_single_file(dest_path, semaphore))
-            tasks.append(task)
-
-            if len(tasks) >= 50:
-                await asyncio.gather(*tasks)
-                processed += len(tasks)
-                tasks = []
-
-    if tasks:
-        await asyncio.gather(*tasks)
-        processed += len(tasks)
-
-    print(f"[+] Found media blobs: {found}")
-    print(f"[+] Copied & fixed metadata: {processed}")
-    print(f"[*] Skipped (already exist): {skipped}")
-    if unknown_mimes:
-        print(f"[*] Unknown MIME types skipped: {len(unknown_mimes)}")
-    print("[!] Note: Dates are approximate (backup export time).")
-    print("    Original message timestamps unavailable in blob-only backups.")
-
-
 async def _import_from_folder():
     print("[*] Import from an already-extracted Signal backup folder.")
 
@@ -282,15 +201,7 @@ async def _import_from_folder():
     if success:
         print("[+] Done.")
     else:
-        if _is_signal_blob_backup(folder):
-            answer = await questionary.confirm(
-                "Attempt content-based MIME recovery? Dates will be approximate.",
-                default=False
-            ).ask_async()
-            if answer:
-                await _import_from_blobs(folder)
-        else:
-            print("[-] Import failed. See diagnostic above.")
+        print("[-] Import failed. See diagnostic above.")
 
 
 async def signal_backup_menu():

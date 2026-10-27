@@ -11,8 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "telethon",
     "python-dotenv",
-    "questionary",
-    "python-magic"
+    "questionary"
 ]
 
 [project.scripts]
