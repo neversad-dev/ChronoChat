@@ -8,6 +8,7 @@ def get_config_dir():
     xdg_config = os.getenv("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
     config_dir = Path(xdg_config) / APP_NAME
     config_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(config_dir, 0o700)
     return config_dir
 
 def get_env_path():

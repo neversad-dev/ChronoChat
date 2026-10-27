@@ -56,7 +56,7 @@ import db
 import asyncio
 
 async def _process_message(client, message, chat_id, save_dir, sem):
-    status = db.get_status(chat_id, message.id)
+    status = await db.get_status(chat_id, message.id)
     if status == 'success':
         return 'skipped'
 
@@ -68,14 +68,14 @@ async def _process_message(client, message, chat_id, save_dir, sem):
             if path:
                 if message.date:
                     metadata.adjust_media_metadata(path, message.date)
-                db.update_status(chat_id, message.id, 'success')
+                await db.update_status(chat_id, message.id, 'success')
                 print(f"[+] Downloaded {os.path.basename(path)}")
                 return 'success'
             else:
-                db.update_status(chat_id, message.id, 'failure', 'Empty path returned')
+                await db.update_status(chat_id, message.id, 'failure', 'Empty path returned')
                 return 'failure'
         except Exception as e:
-            db.update_status(chat_id, message.id, 'failure', str(e))
+            await db.update_status(chat_id, message.id, 'failure', str(e))
             print(f"[-] Failed message {message.id}: {e}")
             return 'failure'
 
@@ -118,7 +118,7 @@ async def download_chat_media(client, dialog):
         await _wait_tasks(0)
 
         # Print summary from database
-        summary = db.get_chat_summary(dialog.id)
+        summary = await db.get_chat_summary(dialog.id)
         success_count = summary.get('success', 0)
         failure_count = summary.get('failure', 0)
         print(f"\n[+] Finished '{dialog.title}'. Total Success: {success_count}, Failures: {failure_count}\n")
