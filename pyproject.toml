@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chronochat"
-version = "0.1.0"
+version = "0.2.0"
 description = "A local chat CLI utility"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -18,4 +18,4 @@ dependencies = [
 chronochat = "main:main"
 
 [tool.setuptools]
-py-modules = ["auth", "config", "metadata", "cli", "main", "db"]
+py-modules = ["auth", "config", "metadata", "cli", "main", "db", "signal_backup"]

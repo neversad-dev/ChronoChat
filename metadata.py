@@ -55,6 +55,12 @@ def get_exif_date(file_path):
         pass
     return None
 
+def _is_reasonable_date(dt):
+    if not dt:
+        return False
+    now = datetime.now()
+    return 1990 <= dt.year <= now.year + 1
+
 def adjust_media_metadata(file_path, message_date):
     """
     Adjusts the metadata of the media file to the earliest valid date among:
@@ -63,33 +69,37 @@ def adjust_media_metadata(file_path, message_date):
     - EXIF date
     """
     filename = os.path.basename(file_path)
-    
-    # 1. Message Date (convert to local time for EXIF writing)
-    msg_date_local = message_date.astimezone()
-    msg_date_naive = msg_date_local.replace(tzinfo=None)
-    dates = [msg_date_naive]
-    
+    candidates = []
+
+    # 1. Message Date
+    if message_date is not None:
+        msg_date_local = message_date.astimezone()
+        msg_date_naive = msg_date_local.replace(tzinfo=None)
+        if _is_reasonable_date(msg_date_naive):
+            candidates.append(msg_date_naive)
+
     # 2. Filename Date
     fn_date = extract_date_from_filename(filename)
-    if fn_date and fn_date.year > 1990:
-        dates.append(fn_date)
-        
+    if _is_reasonable_date(fn_date):
+        candidates.append(fn_date)
+
     # 3. EXIF Date
     exif_date = get_exif_date(file_path)
-    if exif_date and exif_date.year > 1990:
-        dates.append(exif_date)
-        
-    # Find best date (earliest)
-    best_date = min(dates)
-    
-    needs_update = False
-    if not exif_date:
-        needs_update = True
-    else:
+    if _is_reasonable_date(exif_date):
+        candidates.append(exif_date)
+
+    if not candidates:
+        print(f"[-] No reasonable date found for '{filename}', skipping metadata adjustment.")
+        return
+
+    best_date = min(candidates)
+
+    needs_update = True
+    if exif_date and _is_reasonable_date(exif_date):
         diff = abs((exif_date - best_date).total_seconds())
-        if diff > 3600: # allow 1 hour tolerance
-            needs_update = True
-            
+        if diff <= 3600:
+            needs_update = False
+
     if needs_update:
         print(f"[*] Adjusting metadata for '{filename}' to {best_date.strftime('%Y-%m-%d %H:%M:%S')}")
         date_str = best_date.strftime("%Y:%m:%d %H:%M:%S")
@@ -108,7 +118,7 @@ def adjust_media_metadata(file_path, message_date):
             )
         except Exception as e:
             print(f"[-] Failed to update EXIF for {filename}: {e}")
-            
+
     # Always update file modification time as a fallback
     timestamp = best_date.timestamp()
     try:

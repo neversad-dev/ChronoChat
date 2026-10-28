@@ -24,7 +24,7 @@
         {
           default = pkgs.python312Packages.buildPythonApplication {
             pname = "chronochat";
-            version = "0.1.0";
+            version = "0.2.0";
             pyproject = true;
 
             src = ./.;
@@ -39,7 +39,7 @@
               pkgs.python312Packages.questionary
             ];
 
-            propagatedBuildInputs = [ pkgs.exiftool ];
+            propagatedBuildInputs = [ pkgs.exiftool pkgs.signalbackup-tools ];
           };
         });
 
@@ -58,6 +58,7 @@
           default = pkgs.mkShell {
             buildInputs = [
               pkgs.exiftool
+              pkgs.signalbackup-tools
               (pkgs.python312.withPackages (ps: with ps; [
                 (telethon.overridePythonAttrs (old: { doCheck = false; }))
                 python-dotenv
