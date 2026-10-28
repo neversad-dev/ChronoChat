@@ -297,7 +297,7 @@ async def _process_json_export(folder, target_dir):
             missing += 1
             continue
 
-        if not _is_media_file(src):
+        if not (_is_media_file(src) or _is_media_file(dest_name)):
             continue
 
         dest_path, is_dup = _resolve_dest_path(signal_dir, src, dest_name)
