@@ -336,7 +336,7 @@ async def _process_json_export(folder, target_dir):
         print(f"[*] Removed from source (disk space): {removed}")
     if missing:
         print(f"[*] Missing from disk: {missing}")
-    return processed > 0
+    return processed > 0 or skipped > 0
 
 
 async def _process_extracted_media(extracted_dir, target_base_dir):
