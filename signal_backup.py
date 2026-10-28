@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import binascii
+import filecmp
 import json
 import os
 import shutil
@@ -48,7 +49,7 @@ def _resolve_dest_path(signal_dir, src, dest_name):
     if not dest_path.exists():
         return dest_path, False
 
-    if dest_path.stat().st_size == src.stat().st_size:
+    if filecmp.cmp(dest_path, src, shallow=False):
         return dest_path, True
 
     # Same name, different content — find collision-safe name
@@ -59,7 +60,7 @@ def _resolve_dest_path(signal_dir, src, dest_name):
         alt_path = signal_dir / alt_name
         if not alt_path.exists():
             return alt_path, False
-        if alt_path.stat().st_size == src.stat().st_size:
+        if filecmp.cmp(alt_path, src, shallow=False):
             return alt_path, True
         counter += 1
 
