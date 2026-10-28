@@ -37,6 +37,33 @@ _MIME_TO_EXT = {
 }
 
 
+def _resolve_dest_path(signal_dir, src, dest_name):
+    """Find a destination path that avoids overwriting different content.
+
+    Returns (dest_path, is_duplicate). If is_duplicate is True, src should be
+    deleted (same file already preserved). Otherwise, copy src to dest_path.
+    """
+    dest_path = signal_dir / dest_name
+
+    if not dest_path.exists():
+        return dest_path, False
+
+    if dest_path.stat().st_size == src.stat().st_size:
+        return dest_path, True
+
+    # Same name, different content — find collision-safe name
+    base, ext = os.path.splitext(dest_name)
+    counter = 1
+    while True:
+        alt_name = f"{base}_{counter}{ext}"
+        alt_path = signal_dir / alt_name
+        if not alt_path.exists():
+            return alt_path, False
+        if alt_path.stat().st_size == src.stat().st_size:
+            return alt_path, True
+        counter += 1
+
+
 def _is_media_file(path):
     return Path(path).suffix.lower() in _MEDIA_EXTENSIONS
 
@@ -273,10 +300,8 @@ async def _process_json_export(folder, target_dir):
         if not _is_media_file(src):
             continue
 
-        dest_path = signal_dir / dest_name
-
-        if dest_path.exists():
-            # Already imported — remove original to save disk space
+        dest_path, is_dup = _resolve_dest_path(signal_dir, src, dest_name)
+        if is_dup:
             try:
                 os.remove(src)
                 removed += 1
