@@ -381,7 +381,7 @@ async def _process_extracted_media(extracted_dir, target_base_dir):
     print(f"[+] Processed: {processed}")
     print(f"[*] Skipped (already exist): {skipped}")
 
-    if processed == 0 and total_in_dir > 0:
+    if processed == 0 and skipped == 0 and total_in_dir > 0:
         _show_blob_diagnostic(extracted_dir, total_in_dir)
         return False
 
