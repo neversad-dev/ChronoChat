@@ -215,7 +215,9 @@ def _collect_attachments_from_jsonl(export_dir):
                         continue
 
                     if file_name:
-                        dest_name = file_name
+                        dest_name = Path(file_name).name
+                        if dest_name in ('', '.', '..'):
+                            continue
                     else:
                         ext = _MIME_TO_EXT.get(content_type.lower(), '') if content_type else ''
                         dest_name = hash_b64.replace('/', '_').replace('=', '') + ext
