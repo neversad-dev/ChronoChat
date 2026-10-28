@@ -116,17 +116,17 @@ async def _adjust_single_file(file_path, semaphore):
     async with semaphore:
         mtime = os.path.getmtime(file_path)
         mtime_dt = datetime.fromtimestamp(mtime)
-        metadata.adjust_media_metadata(file_path, mtime_dt)
+        await asyncio.to_thread(metadata.adjust_media_metadata, file_path, mtime_dt)
 
 
 async def _adjust_single_file_with_timestamp(file_path, message_ts, semaphore):
     async with semaphore:
         if message_ts is not None:
-            metadata.adjust_media_metadata(str(file_path), message_ts)
+            await asyncio.to_thread(metadata.adjust_media_metadata, str(file_path), message_ts)
         else:
             mtime = os.path.getmtime(file_path)
             mtime_dt = datetime.fromtimestamp(mtime)
-            metadata.adjust_media_metadata(str(file_path), mtime_dt)
+            await asyncio.to_thread(metadata.adjust_media_metadata, str(file_path), mtime_dt)
 
 
 def _parse_timestamp(ts):
